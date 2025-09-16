@@ -3,7 +3,7 @@ name: Deploy to Elastic Beanstalk
 on:
   push:
     branches:
-      - main   # Change if your deploy branch is different
+      - main
 
 jobs:
   deploy:
@@ -16,7 +16,7 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@v3
         with:
-          node-version: '18' # Use your project's Node version
+          node-version: '18'
 
       - name: Install dependencies
         run: npm install
@@ -24,12 +24,10 @@ jobs:
       - name: Build project
         run: npm run build
 
-      - name: Prepare deployment package
+      - name: Zip build folder
         run: |
-          mkdir deploy
-          cp -r build/* deploy/
-          cd deploy
-          zip -r ../deploy.zip .
+          cd build
+          zip -r ../build.zip .
           cd ..
 
       - name: Configure AWS credentials
@@ -39,11 +37,22 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: us-east-1
 
-      - name: Install EB CLI
-        run: pip install awsebcli
-
-      - name: Deploy to Elastic Beanstalk
+      - name: Upload & Deploy to Elastic Beanstalk
         run: |
-          eb init -p node.js my-ecom-app --region us-east-1
-          eb use my-ecom-app-env
-          eb deploy deploy.zip
+          APP_NAME="my-ecom-app"
+          ENV_NAME="my-ecom-app-env"
+          VERSION_LABEL="build-${GITHUB_SHA}"
+
+          # Upload to S3 (EB needs it from S3)
+          aws s3 cp build.zip s3://$APP_NAME-deployments/$VERSION_LABEL.zip --region us-east-1
+
+          # Create new app version
+          aws elasticbeanstalk create-application-version \
+            --application-name $APP_NAME \
+            --version-label $VERSION_LABEL \
+            --source-bundle S3Bucket=$APP_NAME-deployments,S3Key=$VERSION_LABEL.zip
+
+          # Update environment to use new version
+          aws elasticbeanstalk update-environment \
+            --environment-name $ENV_NAME \
+            --version-label $VERSION_LABEL
